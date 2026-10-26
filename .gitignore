@@ -1,0 +1,16 @@
+.DS_Store
+node_modules/
+*.zip
+.env*
+credentials.json
+state.json
+config.json
+setup.txt
+auth.json
+sessions/
+.lock/
+*.tmp
+*.log
+private/
+runtime/
+
