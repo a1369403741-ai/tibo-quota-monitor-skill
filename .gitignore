@@ -6,6 +6,13 @@ credentials.json
 state.json
 config.json
 setup.txt
+monitor-setup.txt
+deepseek-setup.txt
+deepseek.json
+model-state.json
+background-status.json
+health-notice.json
+.background.lock/
 auth.json
 sessions/
 .lock/

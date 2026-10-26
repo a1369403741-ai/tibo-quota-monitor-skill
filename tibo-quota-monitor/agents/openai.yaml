@@ -1,6 +1,6 @@
 interface:
   display_name: "Tibo 额度监控"
-  short_description: "定时检查 Tibo 额度重置与可信预告，使用 Codex 判断并通过飞书通知"
+  short_description: "配置本机独立后台监控，使用 DeepSeek 判断 Tibo 额度动态并通过飞书通知"
   default_prompt: "使用 $tibo-quota-monitor 帮我配置并启动 Tibo 额度监控，通知发送到我自己的飞书机器人。"
 policy:
   allow_implicit_invocation: true

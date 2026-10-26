@@ -151,7 +151,7 @@ export async function configure(home, value) {
     state.notificationTestAt = null;
     writeJson(path.join(home, 'config.json'), config);
     saveState(home, state);
-    return { configured: true, enabled: false, next: 'probe, test-notification, create local Codex schedule, activate' };
+    return { configured: true, enabled: false, next: 'probe, test-notification, configure and check DeepSeek, then background install when authorized' };
   });
 }
 const SETUP_TEXT = `# Tibo 额度监控私人配置。只在等号后填写，保存文件后回到 Codex 说“填好了”。
@@ -223,7 +223,7 @@ export async function pause(home) {
   return withLock(home, async () => {
     const { config } = load(home); config.enabled = false;
     writeJson(path.join(home, 'config.json'), config);
-    return { enabled: false, scheduleId: config.scheduleId, next: 'also pause the saved Codex schedule' };
+    return { enabled: false, scheduleId: config.scheduleId, next: 'also stop the saved scheduler (legacy Codex task or background service)' };
   });
 }
 export async function requestUsageReport(home, requested = true) {
@@ -238,24 +238,29 @@ export async function requestUsageReport(home, requested = true) {
 function curlQuote(value) {
   return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r/g, '\\r').replace(/\n/g, '\\n')}"`;
 }
-export async function requestJson(url, { method = 'GET', body } = {}) {
+export async function requestJson(url, { method = 'GET', body, apiKey } = {}) {
   const target = new URL(url);
+  const modelRequest = target.href === 'https://api.deepseek.com/chat/completions' && method === 'POST';
   if (!['GET', 'POST'].includes(method) || target.protocol !== 'https:' || target.port || target.username || target.password
-    || !['api.fxtwitter.com', 'open.feishu.cn'].includes(target.hostname))
+    || (!['api.fxtwitter.com', 'open.feishu.cn'].includes(target.hostname) && !modelRequest))
     fail('NETWORK_DESTINATION_BLOCKED', '网络目标不在本 Skill 的允许列表中。');
-  if (method === 'POST') validateCredentials({ webhookUrl: url });
+  if (modelRequest && (typeof apiKey !== 'string' || !/^[A-Za-z0-9_-]{16,256}$/.test(apiKey)))
+    fail('INVALID_MODEL_KEY', 'DeepSeek Key 缺失或格式无效。');
+  if (apiKey && !modelRequest) fail('NETWORK_DESTINATION_BLOCKED', '模型密钥只能发送到 DeepSeek 官方接口。');
+  if (method === 'POST' && !modelRequest) validateCredentials({ webhookUrl: url });
   if (method === 'GET' && target.hostname !== 'api.fxtwitter.com')
     fail('NETWORK_DESTINATION_BLOCKED', '采集只能访问指定公开数据源。');
   const config = [`url = ${curlQuote(url)}`, `request = ${curlQuote(method)}`,
     'header = "Accept: application/json"', 'user-agent = "TiboQuotaMonitor/1.0"'];
+  if (modelRequest) config.push(`header = ${curlQuote(`Authorization: Bearer ${apiKey}`)}`);
   if (body !== undefined) config.push('header = "Content-Type: application/json; charset=utf-8"', `data = ${curlQuote(JSON.stringify(body))}`);
   return new Promise((resolve, reject) => {
     const child = spawn('curl', ['--disable', '--silent', '--show-error', '--connect-timeout', '10',
-      '--max-time', '30', '--max-filesize', '1048576', '--proto', '=https', '--max-redirs', '0',
+      '--max-time', modelRequest ? '120' : '30', '--max-filesize', '1048576', '--proto', '=https', '--max-redirs', '0',
       '--config', '-', '--write-out', '\n%{http_code}'], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let result = Buffer.alloc(0), finished = false;
     const finishError = (error) => { if (!finished) { finished = true; reject(error); } };
-    const timer = setTimeout(() => { child.kill(); finishError(new MonitorError('NETWORK_UNCERTAIN', '请求超时，无法确认远端处理结果。')); }, 35_000);
+    const timer = setTimeout(() => { child.kill(); finishError(new MonitorError('NETWORK_UNCERTAIN', '请求超时，无法确认远端处理结果。')); }, modelRequest ? 125_000 : 35_000);
     child.stdout.on('data', chunk => {
       if (result.length + chunk.length > 1_100_000) { child.kill(); finishError(new MonitorError('RESPONSE_TOO_LARGE', '远端响应超出限制。')); }
       else result = Buffer.concat([result, chunk]);
@@ -542,5 +547,22 @@ export async function retryNotification(home, id) {
       fail('INVALID_RETRY', '只能重试已有的失败或送达不明通知。');
     delivery.status = 'pending'; delivery.attempts = 0; delivery.nextAttemptAt = null; delivery.error = null;
     saveState(home, state); return { requeued: id, sent: 0 };
+  });
+}
+
+export async function runtimeNotice(home, code, { request = requestJson, now = Date.now() } = {}) {
+  if (!/^[A-Z_]{1,60}$/.test(code)) fail('INVALID_NOTICE', '运行状态代码无效。');
+  return withLock(home, async () => {
+    const { config } = load(home);
+    if (!config.enabled || !config.notificationAuthorized) return { skipped: true };
+    const file = path.join(home, 'health-notice.json');
+    const previous = readJson(file, {});
+    if (previous.code === code && now - previous.at < 86400_000) return { skipped: true };
+    writeJson(file, { code, at: now, status: 'sending' });
+    await sendPayload(readJson(path.join(home, 'credentials.json'), {}), {
+      msg_type: 'text', content: { text: `Tibo额度提醒｜后台运行需要检查\n状态：${code}\n这是一条运行故障提醒，不是额度重置。请查看本机后台状态；原始数据和待发送消息已保留。\n本次推送时间：${new Intl.DateTimeFormat('zh-CN', { timeZone: config.timezone, dateStyle: 'short', timeStyle: 'medium' }).format(new Date(now))}（${config.timezone}）` },
+    }, request, now);
+    writeJson(file, { code, at: now, status: 'sent' });
+    return { sent: true };
   });
 }

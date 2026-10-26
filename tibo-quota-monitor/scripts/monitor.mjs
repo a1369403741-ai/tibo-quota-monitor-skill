@@ -23,8 +23,8 @@ const help = {
     'apply --stdin': '从标准输入读取本轮 JSON 判断，校验证据并入通知队列',
     send: '仅在已启用且已授权时发送待通知消息',
     'test-notification': '向已授权机器人发送一条明确标识的连接测试',
-    'activate --schedule-id ID': '采集及通知测试通过、宿主创建任务后启用',
-    pause: '本地暂停；还需宿主暂停定时任务',
+    'activate --schedule-id ID': '采集及通知测试通过后由调度安装器启用；不要单独用它冒充后台已安装',
+    pause: '暂停本地发送；还需停止实际调度器',
     'retry-notification --id ID': '用户确认后重新排队指定失败或送达不明通知',
     'recover-lock': '仅恢复所有者进程已退出的旧锁',
     'request-usage-report': '请求下一轮监控结束时报告 Token 用量一次',
@@ -32,7 +32,7 @@ const help = {
     'ack-usage-report': '结束本次用量报告请求，后续无消息时恢复安静',
   },
   defaults: DEFAULT_CONFIG, policy: POLICY,
-  note: '这些脚本不创建系统后台服务、不调用模型 API，也不会自行创建 Codex 定时任务。',
+  note: '这是基础采集与通知 CLI。独立 DeepSeek 后台模式使用 scripts/background.mjs；不需要 Codex 定时任务。',
 };
 const args = process.argv.slice(2);
 const command = args.shift() || 'help';
